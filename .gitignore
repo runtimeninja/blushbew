@@ -1,0 +1,27 @@
+# Node
+node_modules
+.next
+out
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Go
+bin/
+*.exe
+*.test
+*.out
+
+# Env
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
