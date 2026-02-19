@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/runtimeninja/blushbew/services/api/internal/auth"
+	"github.com/runtimeninja/blushbew/services/api/internal/blog"
 	"github.com/runtimeninja/blushbew/services/api/internal/config"
 	"github.com/runtimeninja/blushbew/services/api/internal/db"
 	"github.com/runtimeninja/blushbew/services/api/internal/httpserver"
@@ -24,6 +26,7 @@ func main() {
 
 	logger := observability.NewLogger(cfg.Env)
 
+	// DB connect
 	database, err := db.Connect(ctx, cfg.DBDSN)
 	if err != nil {
 		logger.Error("db connect failed", "error", err)
@@ -38,17 +41,36 @@ func main() {
 	}
 	logger.Info("db migrations ok")
 
-	router := httpserver.NewRouter(logger)
-	srv := httpserver.New(httpserver.Deps{
+	// --- Domain wiring (Repo/Service) ---
+	blogRepo := blog.NewRepo(database.Pool)
+	authSvc := auth.New(database.Pool)
+
+	// Seed admin user from env (only if not exists)
+	if err := authSvc.EnsureAdmin(ctx, cfg.AdminEmail, cfg.AdminPassword); err != nil {
+		logger.Error("ensure admin failed", "error", err)
+		os.Exit(1)
+	}
+
+	// --- Router wiring ---
+	router := httpserver.NewRouter(httpserver.Deps{
+		Logger:         logger,
+		Pool:           database.Pool,
+		AllowedOrigins: cfg.AllowedOrigins,
+		Auth:           authSvc,
+		Blog:           blogRepo,
+	})
+
+	// --- HTTP server ---
+	srv := httpserver.New(httpserver.ServerDeps{
 		Logger:       logger,
 		Addr:         cfg.HTTPAddr,
-		Router:       router,
+		Handler:      router,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
 	})
 
-	// Graceful shutdown
+	// --- Graceful shutdown ---
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
@@ -59,10 +81,12 @@ func main() {
 	}()
 
 	<-stop
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
 	_ = srv.Shutdown(shutdownCtx)
 	time.Sleep(200 * time.Millisecond)
 	logger.Info("shutdown complete")
+
 }

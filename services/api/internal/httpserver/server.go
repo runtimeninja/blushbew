@@ -5,8 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 )
 
 type Server struct {
@@ -14,19 +12,19 @@ type Server struct {
 	logger     *slog.Logger
 }
 
-type Deps struct {
+type ServerDeps struct {
 	Logger       *slog.Logger
 	Addr         string
-	Router       http.Handler
+	Handler      http.Handler
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	IdleTimeout  time.Duration
 }
 
-func New(deps Deps) *Server {
+func New(deps ServerDeps) *Server {
 	s := &http.Server{
 		Addr:         deps.Addr,
-		Handler:      deps.Router,
+		Handler:      deps.Handler,
 		ReadTimeout:  deps.ReadTimeout,
 		WriteTimeout: deps.WriteTimeout,
 		IdleTimeout:  deps.IdleTimeout,
@@ -36,19 +34,6 @@ func New(deps Deps) *Server {
 		httpServer: s,
 		logger:     deps.Logger,
 	}
-}
-
-func NewRouter(logger *slog.Logger) *chi.Mux {
-	r := chi.NewRouter()
-
-	// Basic middleware-less start; we will add request-id/CORS in Step 2
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("content-type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
-
-	return r
 }
 
 func (s *Server) Start() error {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type Config struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+	AllowedOrigins  []string
 }
 
 func Load() (Config, error) {
@@ -34,10 +36,27 @@ func Load() (Config, error) {
 		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT_SECONDS", 10) * time.Second,
 	}
 
+	origins := getEnv("ALLOWED_ORIGINS", "http://localhost:3000")
+	cfg.AllowedOrigins = splitCSV(origins)
+
 	if cfg.DBDSN == "" {
 		return Config{}, fmt.Errorf("DB_DSN is required")
 	}
 	return cfg, nil
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func getEnv(key, fallback string) string {
