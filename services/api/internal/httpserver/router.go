@@ -19,25 +19,54 @@ type Deps struct {
 	Logger         *slog.Logger
 	Pool           *pgxpool.Pool
 	AllowedOrigins []string
-	Auth           *auth.Service
-	Blog           *blog.Repo
+
+	Auth      *auth.Service
+	Blog      *blog.Repo
+	Diagnosis *diagnosis.Service
 }
 
 func NewRouter(d Deps) *chi.Mux {
 	r := chi.NewRouter()
 
-	// middleware chain
-	r.Use(func(next http.Handler) http.Handler { return RequestID(next) })
-	r.Use(func(next http.Handler) http.Handler { return Recover(d.Logger, next) })
-	r.Use(func(next http.Handler) http.Handler { return CORS(d.AllowedOrigins, next) })
-	r.Use(func(next http.Handler) http.Handler { return AccessLog(d.Logger, next) })
+	// =========================================================
+	// IMPORTANT: ALL MIDDLEWARES MUST BE REGISTERED BEFORE ROUTES
+	// =========================================================
+
+	// Request ID (function matches chi middleware signature)
+	r.Use(RequestID)
+
+	// Recover
+	r.Use(func(next http.Handler) http.Handler {
+		return Recover(d.Logger, next)
+	})
+
+	// CORS
+	r.Use(func(next http.Handler) http.Handler {
+		return CORS(d.AllowedOrigins, next)
+	})
+
+	// Rate limit (basic abuse protection)
+	rl := NewRateLimiter(120, 60) // 120 req/min, burst 60
+	r.Use(func(next http.Handler) http.Handler {
+		return RateLimit(rl, next)
+	})
+
+	// Access log
+	r.Use(func(next http.Handler) http.Handler {
+		return AccessLog(d.Logger, next)
+	})
+
+	// =========================================================
+	// ROUTES (ONLY AFTER ALL MIDDLEWARES)
+	// =========================================================
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
 	r.Route("/v1", func(v1 chi.Router) {
-		// Public blog
+
+		// ---------- Public Blog ----------
 		v1.Get("/blog", func(w http.ResponseWriter, r *http.Request) {
 			limit := 20
 			if s := r.URL.Query().Get("limit"); s != "" {
@@ -45,12 +74,14 @@ func NewRouter(d Deps) *chi.Mux {
 					limit = n
 				}
 			}
+
 			posts, err := d.Blog.ListPublished(r.Context(), limit)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "blog_list_failed"})
 				return
 			}
-			// We don't want to send full content in list; keep excerpt
+
+			// list endpoint should not ship full markdown body
 			type item struct {
 				Slug        string     `json:"slug"`
 				Title       string     `json:"title"`
@@ -58,12 +89,18 @@ func NewRouter(d Deps) *chi.Mux {
 				Category    string     `json:"category"`
 				PublishedAt *time.Time `json:"published_at,omitempty"`
 			}
-			out := []item{}
+
+			out := make([]item, 0, len(posts))
 			for _, p := range posts {
 				out = append(out, item{
-					Slug: p.Slug, Title: p.Title, Excerpt: p.Excerpt, Category: p.Category, PublishedAt: p.PublishedAt,
+					Slug:        p.Slug,
+					Title:       p.Title,
+					Excerpt:     p.Excerpt,
+					Category:    p.Category,
+					PublishedAt: p.PublishedAt,
 				})
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"posts": out})
 		})
 
@@ -77,7 +114,7 @@ func NewRouter(d Deps) *chi.Mux {
 			writeJSON(w, http.StatusOK, p)
 		})
 
-		// Tool: diagnosis
+		// ---------- Tool: Diagnosis ----------
 		v1.Post("/diagnosis", func(w http.ResponseWriter, r *http.Request) {
 			var in diagnosis.Input
 			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -89,9 +126,9 @@ func NewRouter(d Deps) *chi.Mux {
 				return
 			}
 
-			out := diagnosis.Fallback(in)
+			out, _ := d.Diagnosis.Analyze(r.Context(), in)
 
-			// Store request for analytics + future tuning
+			// Store for analytics/tuning
 			b, _ := json.Marshal(out)
 			_, _ = d.Pool.Exec(r.Context(), `
 				insert into diagnosis_requests(problem_text, skin_type, climate, event_type, result_json)
@@ -101,7 +138,7 @@ func NewRouter(d Deps) *chi.Mux {
 			writeJSON(w, http.StatusOK, out)
 		})
 
-		// Admin auth
+		// ---------- Admin Auth ----------
 		v1.Post("/admin/login", func(w http.ResponseWriter, r *http.Request) {
 			var body struct {
 				Email    string `json:"email"`
@@ -111,24 +148,28 @@ func NewRouter(d Deps) *chi.Mux {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 				return
 			}
+
 			token, err := d.Auth.Login(r.Context(), body.Email, body.Password)
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_credentials"})
 				return
 			}
+
 			http.SetCookie(w, &http.Cookie{
 				Name:     "bb_admin_session",
 				Value:    token,
 				Path:     "/",
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
-				// Secure: true (prod এ enable করবো)
+				// Secure: true, // enable in prod (https)
 			})
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		})
 
-		// Admin protected routes
+		// ---------- Admin Protected ----------
 		v1.Route("/admin", func(ad chi.Router) {
+			// middleware MUST be before any routes in this subrouter too
 			ad.Use(func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					c, err := r.Cookie("bb_admin_session")
@@ -167,6 +208,7 @@ func NewRouter(d Deps) *chi.Mux {
 				if p.Status == "" {
 					p.Status = "draft"
 				}
+
 				id, err := d.Blog.AdminCreate(r.Context(), p)
 				if err != nil {
 					writeJSON(w, http.StatusBadRequest, map[string]any{"error": "create_failed"})

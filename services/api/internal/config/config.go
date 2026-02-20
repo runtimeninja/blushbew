@@ -20,6 +20,8 @@ type Config struct {
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
 	AllowedOrigins  []string
+	OpenAIModel     string
+	OpenAITimeout   time.Duration
 }
 
 func Load() (Config, error) {
@@ -42,18 +44,19 @@ func Load() (Config, error) {
 	if cfg.DBDSN == "" {
 		return Config{}, fmt.Errorf("DB_DSN is required")
 	}
+
+	cfg.OpenAIModel = getEnv("OPENAI_MODEL", "gpt-4o-mini")
+	cfg.OpenAITimeout = getEnvDuration("OPENAI_TIMEOUT_SECONDS", 20) * time.Second
+
 	return cfg, nil
 }
 
 func splitCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if trimmed := strings.TrimSpace(p); trimmed != "" {
-			out = append(out, trimmed)
+	out := []string{}
+	for _, p := range strings.Split(s, ",") {
+		v := strings.TrimSpace(p)
+		if v != "" {
+			out = append(out, v)
 		}
 	}
 	return out

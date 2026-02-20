@@ -14,6 +14,10 @@ import (
 	"github.com/runtimeninja/blushbew/services/api/internal/db"
 	"github.com/runtimeninja/blushbew/services/api/internal/httpserver"
 	"github.com/runtimeninja/blushbew/services/api/internal/observability"
+
+	// ✅ NEW IMPORTS
+	"github.com/runtimeninja/blushbew/services/api/internal/ai"
+	"github.com/runtimeninja/blushbew/services/api/internal/diagnosis"
 )
 
 func main() {
@@ -51,6 +55,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ✅ NEW: AI + Diagnosis wiring
+	aiClient := ai.NewOpenAI(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAITimeout)
+	diagSvc := diagnosis.NewService(aiClient)
+
 	// --- Router wiring ---
 	router := httpserver.NewRouter(httpserver.Deps{
 		Logger:         logger,
@@ -58,6 +66,7 @@ func main() {
 		AllowedOrigins: cfg.AllowedOrigins,
 		Auth:           authSvc,
 		Blog:           blogRepo,
+		Diagnosis:      diagSvc,
 	})
 
 	// --- HTTP server ---
@@ -88,5 +97,4 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 	time.Sleep(200 * time.Millisecond)
 	logger.Info("shutdown complete")
-
 }
