@@ -41,7 +41,7 @@ export default function FixMyMakeup() {
         return;
       }
       setOut(data);
-    } catch (e: any) {
+    } catch {
       setErr("network_error");
     } finally {
       setLoading(false);

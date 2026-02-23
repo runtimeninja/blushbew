@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="max-w-3xl mx-auto p-6 space-y-6">
@@ -13,16 +15,16 @@ export default function Home() {
         <p className="text-gray-600">
           Example: “My foundation cracks after 2 hours”
         </p>
-        <a className="inline-block px-4 py-2 rounded-lg border" href="/tool/fix-my-makeup">
+        <link className="inline-block px-4 py-2 rounded-lg border" href="/tool/fix-my-makeup">
           Open Tool →
-        </a>
+        </link>
       </section>
 
       <section className="p-4 border rounded-xl space-y-3">
         <h2 className="text-xl font-semibold">Read the latest posts</h2>
-        <a className="inline-block px-4 py-2 rounded-lg border" href="/blog">
+        <link className="inline-block px-4 py-2 rounded-lg border" href="/blog">
           Go to Blog →
-        </a>
+        </link>
       </section>
 
       <footer className="text-sm text-gray-500">
